@@ -244,16 +244,35 @@ async def on_message(message: Message) -> None:
         await message.answer(part)
 
 
-def pin_telegram_ip() -> None:
-    """Через VPN маршрутизируется не весь пул IP Telegram.
+def _pin_loop_getaddrinfo(pin: str) -> None:
+    """Патчит loop.getaddrinfo — путь ресолва aiohttp в asyncio.
 
-    Если DNS выдаёт нерабочий IP — пиним рабочую ноду через TG_PIN_IP
-    (подменяет getaddrinfo только для api.telegram.org; SNI/TLS сохраняются).
-    В Docker/у хостинге переменную просто не задаём.
+    asyncio захватывает socket.getaddrinfo при старте модуля
+    (base_events.getaddr_func), поэтому патч socket.getaddrinfo его не ловит.
+    """
+    loop = asyncio.get_running_loop()
+    orig_getaddrinfo = loop.getaddrinfo
+
+    def pinned_loop(host, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if host == "api.telegram.org":
+            host = pin
+        return orig_getaddrinfo(host, *args, **kwargs)
+
+    loop.getaddrinfo = pinned_loop  # type: ignore[method-assign]
+
+
+def pin_telegram_ip() -> None:
+    """Пинит рабочую ноду api.telegram.org через переменную TG_PIN_IP.
+
+    Нужен там, где DNS выдаёт нерабочие IP (или резолв хромает):
+    подменяет хост только для api.telegram.org, SNI/TLS сохраняются.
+    Патчится и sync-путь (socket.getaddrinfo — httpx и пр.),
+    и путь aiohttp в asyncio (loop.getaddrinfo).
     """
     pin = os.getenv("TG_PIN_IP")
     if not pin:
         return
+
     orig = socket.getaddrinfo
 
     def pinned(host, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
@@ -262,7 +281,8 @@ def pin_telegram_ip() -> None:
         return orig(host, *args, **kwargs)
 
     socket.getaddrinfo = pinned
-    logger.info("api.telegram.org pinned to %s", pin)
+    _pin_loop_getaddrinfo(pin)
+    logger.info("api.telegram.org pinned to %s (socket + asyncio loop)", pin)
 
 
 async def main() -> None:
@@ -280,7 +300,16 @@ async def main() -> None:
     if proxy:
         os.environ["HTTPS_PROXY"] = proxy
     bot = Bot(token=token, session=AiohttpSession(proxy=proxy or None))
-    await bot.delete_webhook(drop_pending_updates=True)
+    # Кратковременный DNS-сбой не должен убивать процесс на старте
+    for attempt in range(1, 6):
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            break
+        except Exception as exc:
+            logger.warning("delete_webhook не удался (попытка %d/5): %s", attempt, exc)
+            if attempt == 5:
+                raise
+            await asyncio.sleep(2 * attempt)
     await dp.start_polling(bot)
 
 
