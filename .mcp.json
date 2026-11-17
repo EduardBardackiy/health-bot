@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pubcrawl": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@pharmatools/pubcrawl"],
+      "env": {
+        "NCBI_API_KEY": ""
+      }
+    }
+  }
+}
