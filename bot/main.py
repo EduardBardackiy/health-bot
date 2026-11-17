@@ -25,7 +25,11 @@ TG_LIMIT = 4096
 PDF_MAX_PAGES = 10
 PDF_MAX_CHARS = 8000
 
-# Проектная документация, доступная боту
+# Проектная документация, доступная боту. Отдаётся из FILES_BASE:
+# на Amvera — персистентный /data (не зависит от деплоев), локально — корень проекта.
+FILES_BASE = "/data" if os.path.isdir("/data") else os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))
+)
 DOCS_MENU = {
     "Цитруллин малат 8 г — разбор": "reports/2026-11-05-citrulline-malate-8g-strength-evidence.md",
     "Оксандролон vs Стромбафорт": "docs/2026-10-30 — ААС — оксандролон vs стромбафорт, разбор курса — конспект.md",
@@ -125,7 +129,7 @@ async def cmd_doc(message: Message) -> None:
         await message.answer("Нет такого номера. Посмотри /report.")
         return
     title = titles[idx]
-    path = DOCS_MENU[title]
+    path = os.path.join(FILES_BASE, DOCS_MENU[title])
     if os.path.exists(path):
         await message.answer_document(FSInputFile(path), caption=title)
     else:
