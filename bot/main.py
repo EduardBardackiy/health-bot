@@ -19,6 +19,7 @@ from pypdf import PdfReader
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from llm import PROVIDERS, get_analysis_reply, get_provider, get_reply, set_provider  # noqa: E402
 from prompts import SYSTEM_PROMPT  # noqa: E402
+from rag import build_index, search as rag_search  # noqa: E402
 
 HISTORY_LIMIT = 12  # сообщений диалога, пересылаемых в модель
 TG_LIMIT = 4096
@@ -49,6 +50,8 @@ HISTORIES_FILE = os.path.join(DATA_DIR, "histories.json")
 dp = Dispatcher()
 # История диалогов: chat_id -> [{"role": ..., "content": ...}, ...]
 histories: dict[int, list[dict]] = {}
+# Мини-RAG по разборам проекта: индекс строится на старте в main()
+rag_index: list[dict] = []
 
 
 def load_histories() -> dict[int, list[dict]]:
@@ -229,7 +232,8 @@ async def on_message(message: Message) -> None:
     history = get_history(message.chat.id)
     history.append({"role": "user", "content": message.text})
     try:
-        reply = get_reply(history[-HISTORY_LIMIT * 2 :])
+        rag_text = rag_search(message.text, rag_index)
+        reply = get_reply(history[-HISTORY_LIMIT * 2 :], rag_context=rag_text or None)
     except Exception as exc:
         logger.exception("Ошибка LLM")
         history.pop()  # неудавшийся ход не оставляем в истории
@@ -290,6 +294,8 @@ async def main() -> None:
     pin_telegram_ip()
     histories.update(load_histories())
     logger.info("Загружено диалогов из %s: %d", HISTORIES_FILE, len(histories))
+    rag_index.extend(build_index(FILES_BASE))
+    logger.info("RAG-индекс: фрагментов %d", len(rag_index))
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise SystemExit("Не задана переменная окружения BOT_TOKEN")

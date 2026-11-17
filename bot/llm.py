@@ -66,16 +66,26 @@ def set_provider(name: str) -> None:
     _override = name
 
 
-def get_reply(history: list[dict]) -> str:
+def get_reply(history: list[dict], rag_context: str | None = None) -> str:
     """history — список {"role": "user"|"assistant", "content": str}.
 
-    Возвращает текст ответа модели текущего провайдера.
+    rag_context — фрагменты разборов проекта (мини-RAG); подмешивается
+    в системный промпт. Возвращает текст ответа модели текущего провайдера.
     """
     from prompts import SYSTEM_PROMPT
 
     client, model = _get_client()
     cfg = PROVIDERS[get_provider()]
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history]
+    system = SYSTEM_PROMPT
+    if rag_context:
+        system += (
+            "\n\n# Разборы автора проекта (RAG-контекст к вопросу)\n"
+            "Ниже фрагменты моих (Эдуарда) разборов по теме вопроса. Используй их, "
+            "если они релевантны; сошлись на название разбора. Не выдумывай того, "
+            "чего в них нет; PubMed-ссылки из фрагментов давай как есть.\n\n"
+            f"{rag_context}"
+        )
+    messages = [{"role": "system", "content": system}, *history]
     params: dict = {cfg["max_param"]: 2000}
     if cfg["temperature"] is not None:
         params["temperature"] = cfg["temperature"]
