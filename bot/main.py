@@ -269,7 +269,7 @@ def pin_telegram_ip() -> None:
     Патчится и sync-путь (socket.getaddrinfo — httpx и пр.),
     и путь aiohttp в asyncio (loop.getaddrinfo).
     """
-    pin = os.getenv("TG_PIN_IP")
+    pin = (os.getenv("TG_PIN_IP") or "").strip()
     if not pin:
         return
 
