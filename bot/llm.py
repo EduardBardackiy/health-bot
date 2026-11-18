@@ -66,11 +66,47 @@ def set_provider(name: str) -> None:
     _override = name
 
 
-def get_reply(history: list[dict], rag_context: str | None = None) -> str:
+SEARCH_TERMS_PROMPT = (
+    "Ты ассистент поиска по PubMed. Пользователь шлёт вопрос (обычно по-русски). "
+    "Извлеки из него 3-6 ключевых слов или коротких фраз НА АНГЛИЙСКОМ для поиска "
+    "в Medline: названия веществ/препаратов, вмешательство, эффект/исход, популяция. "
+    "Выведи только их через запятую, в одну строку, без нумерации, кавычек и пояснений. "
+    "Если вопрос не связан с медициной, биологией, питанием, добавками или "
+    "тренировками — выведи пустую строку."
+)
+
+
+def get_search_terms(question: str) -> list[str]:
+    """Ассистент PubMed-поиска: вопрос (обычно русский) → 3-6 англ. терминов.
+
+    Лёгкий дешёвый вызов до основного ответа; пустой список = не медицина.
+    """
+    client, model = _get_client()
+    cfg = PROVIDERS[get_provider()]
+    params: dict = {cfg["max_param"]: 120}
+    if cfg["temperature"] is not None:
+        params["temperature"] = 0.2
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SEARCH_TERMS_PROMPT},
+            {"role": "user", "content": question},
+        ],
+        **params,
+    )
+    raw = (resp.choices[0].message.content or "").strip()
+    terms = [t.strip().lower() for t in raw.replace("\n", " ").split(",") if t.strip()]
+    return terms[:6]
+
+
+def get_reply(
+    history: list[dict], rag_context: str | None = None, pmc_context: str | None = None
+) -> str:
     """history — список {"role": "user"|"assistant", "content": str}.
 
-    rag_context — фрагменты разборов проекта (мини-RAG); подмешивается
-    в системный промпт. Возвращает текст ответа модели текущего провайдера.
+    rag_context — фрагменты разборов проекта (мини-RAG); pmc_context —
+    PubMed-статьи (пред-поиск Europe PMC). Оба подмешиваются в системный
+    промпт. Возвращает текст ответа модели текущего провайдера.
     """
     from prompts import SYSTEM_PROMPT
 
@@ -84,6 +120,15 @@ def get_reply(history: list[dict], rag_context: str | None = None) -> str:
             "если они релевантны; сошлись на название разбора. Не выдумывай того, "
             "чего в них нет; PubMed-ссылки из фрагментов давай как есть.\n\n"
             f"{rag_context}"
+        )
+    if pmc_context:
+        system += (
+            "\n\n# Статьи по теме (пред-поиск PubMed/Europe PMC)\n"
+            "Ниже статьи, найденные по вопросу. Опирайся на них в доказательной "
+            "части: указывай только PMID из этого списка, не выдумывай PMID и "
+            "не приписывай статьям того, чего нет в их данных. Если среди них "
+            "нет релевантных — так и скажи, список не используй.\n\n"
+            f"{pmc_context}"
         )
     messages = [{"role": "system", "content": system}, *history]
     params: dict = {cfg["max_param"]: 2000}

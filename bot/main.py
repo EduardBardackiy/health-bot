@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from llm import PROVIDERS, get_analysis_reply, get_provider, get_reply, set_provider  # noqa: E402
 from prompts import SYSTEM_PROMPT  # noqa: E402
 from rag import build_index, search as rag_search  # noqa: E402
+from pmc import search as pmc_search  # noqa: E402
 
 HISTORY_LIMIT = 12  # сообщений диалога, пересылаемых в модель
 TG_LIMIT = 4096
@@ -233,7 +234,13 @@ async def on_message(message: Message) -> None:
     history.append({"role": "user", "content": message.text})
     try:
         rag_text = rag_search(message.text, rag_index)
-        reply = get_reply(history[-HISTORY_LIMIT * 2 :], rag_context=rag_text or None)
+        # Только текстовый чат: разбор анализов работает без PubMed-фиды
+        pmc_text = await asyncio.to_thread(pmc_search, message.text)
+        reply = get_reply(
+            history[-HISTORY_LIMIT * 2 :],
+            rag_context=rag_text or None,
+            pmc_context=pmc_text or None,
+        )
     except Exception as exc:
         logger.exception("Ошибка LLM")
         history.pop()  # неудавшийся ход не оставляем в истории
